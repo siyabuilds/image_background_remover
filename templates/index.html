@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Remove Background</title>
+    <link
+      rel="stylesheet"
+      href="{{ url_for('static', filename='style.css') }}"
+    />
+    <script
+      src="https://kit.fontawesome.com/5708525d29.js"
+      crossorigin="anonymous"
+    ></script>
+  </head>
+  <body>
+    <div class="container">
+      <!--
+        Header block: application title and icon
+        Contains the app icon (Font Awesome) and the primary heading.
+      -->
+      <header class="app-header">
+        <i class="icon fas fa-magic" aria-hidden="true"></i>
+        <h1>Remove Image Background</h1>
+      </header>
+
+      <main class="app-grid">
+        <section class="panel panel-left">
+          <form
+            id="remove-form"
+            action="/remove"
+            method="POST"
+            enctype="multipart/form-data"
+          >
+            <!--
+              File input label (visually hidden).
+              Uses the `.sr-only` utility so screen readers get a proper label.
+            -->
+            <label for="image" class="sr-only">Choose an image</label>
+
+            <div class="dropzone" id="dropzone" tabindex="0">
+              <input
+                type="file"
+                name="image"
+                id="image"
+                accept="image/*"
+                required
+              />
+
+              <!--
+                Dropzone inner content: icon + instructional text
+                Shown when no file is selected.
+              -->
+              <div class="dz-inner">
+                <div class="dz-icon" aria-hidden="true">
+                  <i class="fas fa-cloud-upload-alt"></i>
+                </div>
+                <div class="dz-text">
+                  <div class="dz-title">
+                    Drag & drop an image here or click to select
+                  </div>
+                  <div class="dz-sub">PNG, JPG, GIF • Max 10MB</div>
+                </div>
+              </div>
+
+              <!--
+                Preview area (hidden by default).
+                Displays thumbnail, filename and a clear/remove button
+                after the user selects or drops a file.
+              -->
+              <div class="dz-preview hidden" id="dz-preview">
+                <div class="dz-thumb">
+                  <img id="dz-thumb-img" alt="preview" src="" />
+                </div>
+                <div class="dz-meta">
+                  <div id="dz-filename" class="dz-filename"></div>
+                  <button
+                    id="dz-clear"
+                    class="dz-clear"
+                    type="button"
+                    title="Remove file"
+                  >
+                    <i class="fas fa-times"></i>
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Submit controls -->
+            <div class="controls">
+              <button type="submit" id="submit-btn" class="btn-primary">
+                <i class="icon fas fa-upload" aria-hidden="true"></i>
+                Remove Background
+              </button>
+            </div>
+          </form>
+        </section>
+
+        <aside class="panel panel-right">
+          <!--
+            Result card (hidden until a processed image is available).
+            Shows the resulting image, download and clear actions.
+          -->
+          <div id="result" class="result-card" style="display: none">
+            <div class="result-header">
+              <h2>Result</h2>
+              <div class="result-actions">
+                <a
+                  id="download-link"
+                  class="icon-btn"
+                  href="#"
+                  download
+                  title="Download result"
+                >
+                  <i class="icon fas fa-download" aria-hidden="true"></i>
+                </a>
+                <button id="clear-btn" class="icon-btn" title="Clear result">
+                  <i class="icon fas fa-trash" aria-hidden="true"></i>
+                </button>
+              </div>
+            </div>
+
+            <div class="result-body">
+              <div class="image-wrap">
+                <img id="result-image" alt="Result" />
+              </div>
+            </div>
+          </div>
+        </aside>
+      </main>
+    </div>
+
+    <script>
+      /*
+        Page JavaScript
+        Grouped block comments are used to describe each logical section
+        instead of many short inline // comments.
+      */
+      document.addEventListener("DOMContentLoaded", () => {
+        const form = document.getElementById("remove-form");
+        const submitBtn = document.getElementById("submit-btn");
+        const resultDiv = document.getElementById("result");
+        const resultImg = document.getElementById("result-image");
+        const downloadLink = document.getElementById("download-link");
+        const clearBtn = document.getElementById("clear-btn");
+
+        /* Enhanced upload UI elements */
+        const dropzone = document.getElementById("dropzone");
+        const fileInputEl = document.getElementById("image");
+        const dzPreview = document.getElementById("dz-preview");
+        const dzThumbImg = document.getElementById("dz-thumb-img");
+        const dzFilename = document.getElementById("dz-filename");
+        const dzClear = document.getElementById("dz-clear");
+
+        /* Keep track of any object URL we create so we can revoke it later */
+        let lastObjectUrl = null;
+
+        /* Form submit: send image to server and handle response */
+        form.addEventListener("submit", async (e) => {
+          e.preventDefault();
+          if (!fileInputEl.files.length) return;
+
+          const formData = new FormData(form);
+          const originalText = submitBtn.textContent;
+          submitBtn.disabled = true;
+          submitBtn.textContent = "Processing...";
+
+          try {
+            const res = await fetch(form.action, {
+              method: "POST",
+              body: formData,
+              credentials: "same-origin",
+            });
+
+            if (!res.ok) {
+              const text = await res.text();
+              throw new Error(text || "Server error");
+            }
+
+            const contentType = res.headers.get("Content-Type") || "";
+
+            /* Clear any prior object URL (we'll revoke it when replaced) */
+            if (lastObjectUrl) {
+              URL.revokeObjectURL(lastObjectUrl);
+              lastObjectUrl = null;
+            }
+
+            if (contentType.startsWith("application/json")) {
+              const data = await res.json();
+              if (data.url) {
+                resultImg.src = data.url;
+                downloadLink.href = data.url;
+                resultDiv.style.display = "block";
+              } else if (data.error) {
+                throw new Error(data.error);
+              } else {
+                throw new Error("Unexpected JSON response");
+              }
+            } else if (contentType.startsWith("image/")) {
+              /* If server returns raw image bytes */
+              const blob = await res.blob();
+              const objectUrl = URL.createObjectURL(blob);
+              lastObjectUrl = objectUrl;
+              resultImg.src = objectUrl;
+              downloadLink.href = objectUrl;
+              /* Suggest filename based on mimetype */
+              const ext = contentType.split("/")[1] || "png";
+              downloadLink.download = `result.${ext}`;
+              resultDiv.style.display = "block";
+            } else {
+              /* Fallback: show text response */
+              const text = await res.text();
+              throw new Error(text || "Unexpected response type");
+            }
+          } catch (err) {
+            /* Minimal error UI — replace with your preferred handling */
+            alert(err.message || "An error occurred");
+          } finally {
+            submitBtn.disabled = false;
+            submitBtn.textContent = originalText;
+          }
+        });
+
+        /* Clear/hide the result card */
+        if (clearBtn) {
+          clearBtn.addEventListener("click", (ev) => {
+            ev.preventDefault();
+            if (lastObjectUrl) {
+              URL.revokeObjectURL(lastObjectUrl);
+              lastObjectUrl = null;
+            }
+            resultImg.src = "";
+            downloadLink.href = "#";
+            resultDiv.style.display = "none";
+          });
+        }
+
+        /* Dropzone / preview handling */
+        function showFilePreview(file) {
+          if (!file) return hidePreview();
+          dzFilename.textContent = `${file.name} · ${(file.size / 1024).toFixed(
+            0
+          )} KB`;
+
+          /* Show thumbnail for images */
+          if (file.type.startsWith("image/")) {
+            const reader = new FileReader();
+            reader.onload = (ev) => {
+              dzThumbImg.src = ev.target.result;
+            };
+            reader.readAsDataURL(file);
+          } else {
+            dzThumbImg.src = "";
+          }
+
+          dzPreview.classList.remove("hidden");
+          dropzone.classList.add("has-file");
+        }
+
+        function hidePreview() {
+          dzPreview.classList.add("hidden");
+          dzThumbImg.src = "";
+          dzFilename.textContent = "";
+          dropzone.classList.remove("has-file", "dragover");
+        }
+
+        /* When user selects file via file picker */
+        fileInputEl.addEventListener("change", (e) => {
+          const f = fileInputEl.files && fileInputEl.files[0];
+          if (f) showFilePreview(f);
+          else hidePreview();
+        });
+
+        /* Click on dropzone opens file picker (except when clicking the clear button) */
+        dropzone.addEventListener("click", (ev) => {
+          if (ev.target === dzClear) return;
+          fileInputEl.click();
+        });
+
+        /* Keyboard: Enter/Space opens file picker */
+        dropzone.addEventListener("keydown", (ev) => {
+          if (ev.key === "Enter" || ev.key === " ") {
+            ev.preventDefault();
+            fileInputEl.click();
+          }
+        });
+
+        /* Drag & drop visual handling */
+        ["dragenter", "dragover"].forEach((evt) => {
+          dropzone.addEventListener(evt, (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            dropzone.classList.add("dragover");
+          });
+        });
+        ["dragleave", "drop"].forEach((evt) => {
+          dropzone.addEventListener(evt, (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            dropzone.classList.remove("dragover");
+          });
+        });
+
+        dropzone.addEventListener("drop", (e) => {
+          if (!e.dataTransfer) return;
+          const file = e.dataTransfer.files && e.dataTransfer.files[0];
+          if (file) {
+            /* Set the file into the real input so form submit works */
+            const dt = new DataTransfer();
+            dt.items.add(file);
+            fileInputEl.files = dt.files;
+            showFilePreview(file);
+          }
+        });
+
+        /* Clear button inside preview */
+        if (dzClear) {
+          dzClear.addEventListener("click", (ev) => {
+            ev.preventDefault();
+            fileInputEl.value = "";
+            hidePreview();
+          });
+        }
+      });
+    </script>
+  </body>
+</html>
